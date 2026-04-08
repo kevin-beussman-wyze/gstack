@@ -2245,7 +2245,7 @@ describe('setup script validation', () => {
 
   test('setup supports --host auto|claude|codex|kiro|opencode', () => {
     expect(setupContent).toContain('--host');
-    expect(setupContent).toContain('claude|codex|kiro|factory|opencode|auto');
+    expect(setupContent).toContain('claude|codex|kiro|factory|opencode|copilot|auto');
   });
 
   test('auto mode detects claude, codex, kiro, and opencode binaries', () => {

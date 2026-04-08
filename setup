@@ -43,7 +43,7 @@ TEAM_MODE=0
 NO_TEAM_MODE=0
 while [ $# -gt 0 ]; do
   case "$1" in
-    --host) [ -z "$2" ] && echo "Missing value for --host (expected claude, codex, kiro, factory, opencode, openclaw, hermes, gbrain, or auto)" >&2 && exit 1; HOST="$2"; shift 2 ;;
+    --host) [ -z "$2" ] && echo "Missing value for --host (expected claude, codex, kiro, factory, opencode, openclaw, hermes, gbrain, copilot, or auto)" >&2 && exit 1; HOST="$2"; shift 2 ;;
     --host=*) HOST="${1#--host=}"; shift ;;
     --local) LOCAL_INSTALL=1; shift ;;
     --prefix)    SKILL_PREFIX=1; SKILL_PREFIX_FLAG=1; shift ;;
@@ -56,7 +56,7 @@ while [ $# -gt 0 ]; do
 done
 
 case "$HOST" in
-  claude|codex|kiro|factory|opencode|auto) ;;
+  claude|codex|kiro|factory|opencode|copilot|auto) ;;
   openclaw)
     echo ""
     echo "OpenClaw integration uses a different model — OpenClaw spawns Claude Code"
@@ -91,7 +91,7 @@ case "$HOST" in
     echo "GBrain setup and brain skills ship from the GBrain repo."
     echo ""
     exit 0 ;;
-  *) echo "Unknown --host value: $HOST (expected claude, codex, kiro, factory, opencode, openclaw, hermes, gbrain, or auto)" >&2; exit 1 ;;
+  *) echo "Unknown --host value: $HOST (expected claude, codex, kiro, factory, opencode, openclaw, hermes, gbrain, copilot, or auto)" >&2; exit 1 ;;
 esac
 
 # ─── Resolve skill prefix preference ─────────────────────────
@@ -155,6 +155,7 @@ INSTALL_CODEX=0
 INSTALL_KIRO=0
 INSTALL_FACTORY=0
 INSTALL_OPENCODE=0
+INSTALL_COPILOT=0
 if [ "$HOST" = "auto" ]; then
   command -v claude >/dev/null 2>&1 && INSTALL_CLAUDE=1
   command -v codex >/dev/null 2>&1 && INSTALL_CODEX=1
@@ -175,6 +176,8 @@ elif [ "$HOST" = "factory" ]; then
   INSTALL_FACTORY=1
 elif [ "$HOST" = "opencode" ]; then
   INSTALL_OPENCODE=1
+elif [ "$HOST" = "copilot" ]; then
+  INSTALL_COPILOT=1
 fi
 
 migrate_direct_codex_install() {
@@ -318,6 +321,16 @@ if [ "$INSTALL_OPENCODE" -eq 1 ] && [ "$NEEDS_BUILD" -eq 0 ]; then
     cd "$SOURCE_GSTACK_DIR"
     bun install --frozen-lockfile 2>/dev/null || bun install
     bun run gen:skill-docs --host opencode
+  )
+fi
+
+# 1e. Generate .copilot/ GitHub Copilot skill docs
+if [ "$INSTALL_COPILOT" -eq 1 ] && [ "$NEEDS_BUILD" -eq 0 ]; then
+  log "Generating .copilot/ skill docs..."
+  (
+    cd "$SOURCE_GSTACK_DIR"
+    bun install --frozen-lockfile 2>/dev/null || bun install
+    bun run gen:skill-docs --host copilot
   )
 fi
 
@@ -933,6 +946,57 @@ if [ "$INSTALL_OPENCODE" -eq 1 ]; then
   echo "gstack ready (opencode)."
   echo "  browse: $BROWSE_BIN"
   echo "  opencode skills: $OPENCODE_SKILLS"
+fi
+
+# 6c. Install for GitHub Copilot
+if [ "$INSTALL_COPILOT" -eq 1 ]; then
+  COPILOT_SKILLS="$HOME/.copilot/skills"
+  COPILOT_GSTACK="$COPILOT_SKILLS/gstack"
+  COPILOT_SKILL_DOCS="$SOURCE_GSTACK_DIR/.copilot/skills"
+  mkdir -p "$COPILOT_SKILLS"
+
+  # Create gstack dir with symlinks for runtime assets
+  [ -L "$COPILOT_GSTACK" ] && rm -f "$COPILOT_GSTACK"
+  mkdir -p "$COPILOT_GSTACK" "$COPILOT_GSTACK/browse" "$COPILOT_GSTACK/gstack-upgrade" "$COPILOT_GSTACK/review"
+  ln -snf "$SOURCE_GSTACK_DIR/bin" "$COPILOT_GSTACK/bin"
+  if [ -d "$SOURCE_GSTACK_DIR/browse/dist" ]; then
+    ln -snf "$SOURCE_GSTACK_DIR/browse/dist" "$COPILOT_GSTACK/browse/dist"
+  fi
+  if [ -d "$SOURCE_GSTACK_DIR/browse/bin" ]; then
+    ln -snf "$SOURCE_GSTACK_DIR/browse/bin" "$COPILOT_GSTACK/browse/bin"
+  fi
+  if [ -f "$SOURCE_GSTACK_DIR/ETHOS.md" ]; then
+    ln -snf "$SOURCE_GSTACK_DIR/ETHOS.md" "$COPILOT_GSTACK/ETHOS.md"
+  fi
+  if [ -f "$COPILOT_SKILL_DOCS/gstack-upgrade/SKILL.md" ]; then
+    ln -snf "$COPILOT_SKILL_DOCS/gstack-upgrade/SKILL.md" "$COPILOT_GSTACK/gstack-upgrade/SKILL.md"
+  fi
+  for f in checklist.md design-checklist.md greptile-triage.md TODOS-format.md; do
+    if [ -f "$SOURCE_GSTACK_DIR/review/$f" ]; then
+      ln -snf "$SOURCE_GSTACK_DIR/review/$f" "$COPILOT_GSTACK/review/$f"
+    fi
+  done
+
+  # Root gstack SKILL.md
+  if [ -f "$COPILOT_SKILL_DOCS/gstack/SKILL.md" ]; then
+    cp "$COPILOT_SKILL_DOCS/gstack/SKILL.md" "$COPILOT_GSTACK/SKILL.md"
+  fi
+
+  if [ ! -d "$COPILOT_SKILL_DOCS" ]; then
+    echo "  warning: no .copilot/skills/ directory found — run 'bun run gen:skill-docs --host copilot' first" >&2
+  else
+    for skill_dir in "$COPILOT_SKILL_DOCS"/gstack-*/; do
+      [ -f "$skill_dir/SKILL.md" ] || continue
+      skill_name="$(basename "$skill_dir")"
+      target_dir="$COPILOT_SKILLS/$skill_name"
+      mkdir -p "$target_dir"
+      cp "$skill_dir/SKILL.md" "$target_dir/SKILL.md"
+    done
+    echo "gstack ready (copilot)."
+    echo "  browse: $BROWSE_BIN"
+    echo "  copilot skills: $COPILOT_SKILLS"
+  fi
+
 fi
 
 # 7. Create .agents/ sidecar symlinks for the real Codex skill target.

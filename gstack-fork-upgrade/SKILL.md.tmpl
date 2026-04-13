@@ -1,0 +1,138 @@
+---
+name: gstack-fork-upgrade
+description: |
+  Upgrade gstack from the personal fork at ~/repos/gstack. Pulls the latest
+  upstream changes from garrytan/gstack, rebases the feat/copilot-host branch,
+  pushes the rebased branch to the fork remote, and runs setup to reinstall.
+  Use when asked to "upgrade gstack from fork", "update my gstack fork",
+  "sync gstack fork", or "rebase gstack".
+allowed-tools:
+  - Bash
+---
+
+# /gstack-fork-upgrade
+
+Upgrade the Copilot gstack install from the personal fork at `~/repos/gstack`.
+
+## Step 1: Verify fork repo
+
+```bash
+FORK_DIR="$HOME/repos/gstack"
+FORK_BRANCH="feat/copilot-host"
+UPSTREAM_REMOTE="origin"
+FORK_REMOTE="fork"
+
+if [ ! -d "$FORK_DIR/.git" ]; then
+  echo "ERROR: Fork repo not found at $FORK_DIR"
+  exit 1
+fi
+
+cd "$FORK_DIR"
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+echo "FORK_DIR=$FORK_DIR"
+echo "CURRENT_BRANCH=$CURRENT_BRANCH"
+echo "STATUS=$(git status --short | wc -l | tr -d ' ') modified files"
+cat VERSION
+```
+
+If `CURRENT_BRANCH` is not `feat/copilot-host`, switch to it:
+```bash
+git checkout feat/copilot-host
+```
+
+If there are uncommitted changes (STATUS > 0), warn the user before proceeding.
+
+## Step 2: Record old version
+
+```bash
+cd "$FORK_DIR"
+OLD_VERSION=$(cat VERSION)
+echo "OLD_VERSION=$OLD_VERSION"
+git log --oneline -1
+```
+
+## Step 3: Fetch upstream and rebase
+
+```bash
+cd "$FORK_DIR"
+git fetch "$UPSTREAM_REMOTE"
+echo "---upstream log---"
+git log --oneline HEAD..origin/main
+```
+
+If there are no new upstream commits (`upstream log` is empty), skip the rebase and tell the user "Already up to date with upstream (v{version})." Then proceed to Step 5 to re-run setup in case the install needs refreshing.
+
+Otherwise, rebase:
+
+```bash
+cd "$FORK_DIR"
+git rebase origin/main
+```
+
+If the rebase has conflicts, abort and stop:
+```bash
+git rebase --abort
+```
+Tell the user: "Rebase conflict detected — aborted. Resolve conflicts in `$FORK_DIR` manually, then re-run `/gstack-fork-upgrade`."
+
+## Step 4: Push rebased branch to fork remote
+
+```bash
+cd "$FORK_DIR"
+git push "$FORK_REMOTE" "$FORK_BRANCH" --force-with-lease
+```
+
+Show the output. If push fails, warn but continue with the install.
+
+## Step 5: Run setup
+
+```bash
+cd "$FORK_DIR"
+./setup --host copilot 2>&1
+SETUP_EXIT=$?
+```
+
+Note: exit code 1 from setup may be caused by a non-critical `cp` error (identical files) or the Windows-only Node server bundle build — check the output. If `gstack ready (copilot).` appears in the output, the install succeeded.
+
+After setup, ensure `browse/dist` is a symlink (not a real directory):
+
+```bash
+COPILOT_GSTACK="$HOME/.copilot/skills/gstack"
+BROWSE_DIST="$COPILOT_GSTACK/browse/dist"
+if [ ! -L "$BROWSE_DIST" ] && [ -d "$BROWSE_DIST" ]; then
+  echo "Fixing browse/dist symlink..."
+  rm -rf "$BROWSE_DIST"
+  ln -s "$FORK_DIR/browse/dist" "$BROWSE_DIST"
+  echo "Fixed: browse/dist -> $FORK_DIR/browse/dist"
+fi
+ls -la "$BROWSE_DIST"
+```
+
+## Step 6: Write upgrade marker
+
+```bash
+mkdir -p ~/.gstack
+echo "$OLD_VERSION" > ~/.gstack/just-upgraded-from
+rm -f ~/.gstack/last-update-check ~/.gstack/update-snoozed
+NEW_VERSION=$(cat "$FORK_DIR/VERSION")
+echo "NEW_VERSION=$NEW_VERSION"
+```
+
+## Step 7: Show summary
+
+Report:
+- Old version → New version
+- How many upstream commits were absorbed (from the log in Step 3)
+- That the branch was force-pushed to the fork remote
+- That the Copilot skills were refreshed
+
+Format:
+```
+gstack fork upgraded v{old} → v{new}
+
+- Rebased feat/copilot-host onto upstream main ({N} new commits)
+- Pushed rebased branch to fork/feat/copilot-host
+- Copilot skills refreshed at ~/.copilot/skills/
+
+Happy shipping!
+```
